@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时聊天应用</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        #login-container {
+            text-align: center;
+            margin-top: 100px;
+        }
+
+        #chat-container {
+            display: none;
+            width: 800px;
+            margin: 0 auto;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        #chat-header {
+            background-color: #007bff;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+
+        #chat-messages {
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 10px;
+            margin: 5px;
+            border-radius: 10px;
+        }
+
+        .message.self {
+            align-self: flex-end;
+            background-color: #dcf8c6;
+        }
+
+        .message.other {
+            align-self: flex-start;
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+        }
+
+        #chat-input {
+            padding: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 8px;
+            margin-right: 10px;
+        }
+
+        #receiverInput {
+            padding: 8px;
+            margin-right: 10px;
+        }
+
+        #sendTextButton {
+            padding: 8px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        #online-users {
+            width: 200px;
+            float: left;
+            border-right: 1px solid #ccc;
+            padding: 10px;
+        }
+
+        #online-users ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        #online-users li {
+            cursor: pointer;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="login-container">
+        <h1>请登录</h1>
+        <input type="text" id="usernameInput" placeholder="输入用户名">
+        <button id="loginButton">登录</button>
+    </div>
+    <div id="chat-container">
+        <div id="chat-header">
+            <h1>做姐妹，说心里话</h1>
+        </div>
+        <div id="online-users">
+            <h3>在线人员</h3>
+            <ul id="onlineUsersList"></ul>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input">
+            <input type="text" id="messageInput" placeholder="输入消息">
+            <input type="text" id="receiverInput" placeholder="输入接收者（留空为群聊）" readonly>
+            <button id="sendTextButton">心里话</button>
+        </div>
+    </div>
+    <script>
+        let socket;
+        let username;
+
+        const storedUsername = localStorage.getItem('username');
+        if (storedUsername) {
+            username = storedUsername;
+            connectWebSocket();
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('chat-container').style.display = 'block';
+        }
+
+        document.getElementById('loginButton').addEventListener('click', function () {
+            username = document.getElementById('usernameInput').value;
+            if (username) {
+                localStorage.setItem('username', username);
+                connectWebSocket();
+                document.getElementById('login-container').style.display = 'none';
+                document.getElementById('chat-container').style.display = 'block';
+            }
+        });
+
+        function connectWebSocket() {
+            socket = new WebSocket('ws://localhost:8025/ws/websocket');
+
+            socket.onopen = function () {
+                console.log('连接到服务器');
+                const loginData = {
+                    type: 'login',
+                    username: username
+                };
+                socket.send(JSON.stringify(loginData));
+            };
+
+            socket.onmessage = function (event) {
+                const messagesDiv = document.getElementById('chat-messages');
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'online_users') {
+                        updateOnlineUsers(data.users);
+                    } else if (data.type === 'user_join' || data.type === 'user_leave') {
+                        updateOnlineUsers(data.users);
+                    } else if (data.type === 'message') {
+                        const sender = data.sender;
+                        const content = data.content;
+                        const receiver = data.receiver;
+                        const messageDiv = document.createElement('div');
+                        messageDiv.classList.add('message');
+                        if (sender === username) {
+                            messageDiv.classList.add('self');
+                            if (receiver) {
+                                messageDiv.textContent = `你私聊 ${receiver}: ${content}`;
+                            } else {
+                                messageDiv.textContent = `你群聊消息: ${content}`;
+                            }
+                        } else {
+                            messageDiv.classList.add('other');
+                            if (receiver) {
+                                messageDiv.textContent = `${sender} 私聊你: ${content}`;
+                            } else {
+                                messageDiv.textContent = `${sender} 群聊消息: ${content}`;
+                            }
+                        }
+                        messagesDiv.appendChild(messageDiv);
+                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                    }
+                } catch (error) {
+                    console.error('解析消息时出错:', error);
+                }
+            };
+
+            socket.onclose = function () {
+                console.log('与服务器的连接已关闭');
+                document.getElementById('login-container').style.display = 'block';
+                document.getElementById('chat-container').style.display = 'none';
+                localStorage.removeItem('username');
+            };
+
+            document.getElementById('sendTextButton').addEventListener('click', function () {
+                const input = document.getElementById('messageInput');
+                const receiverInput = document.getElementById('receiverInput');
+                const message = input.value;
+                const receiver = receiverInput.value;
+                if (message) {
+                    const data = {
+                        type: 'message',
+                        sender: username,
+                        content: message,
+                        receiver: receiver
+                    };
+                    socket.send(JSON.stringify(data));
+                    input.value = '';
+                    receiverInput.value = '';
+                }
+            });
+
+            document.getElementById('onlineUsersList').addEventListener('click', function (event) {
+                if (event.target.tagName === 'LI') {
+                    const receiver = event.target.textContent;
+                    document.getElementById('receiverInput').value = receiver;
+                }
+            });
+        }
+
+        function updateOnlineUsers(onlineUsers) {
+            const onlineUsersList = document.getElementById('onlineUsersList');
+            onlineUsersList.innerHTML = '';
+            onlineUsers.forEach(user => {
+                if (user !== username) {
+                    const li = document.createElement('li');
+                    li.textContent = user;
+                    onlineUsersList.appendChild(li);
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
+
